@@ -19,11 +19,11 @@ For fast processing, InFuseR only accepts a custom binary format that is directl
 
 We provide a simple tool to convert SNAP format to our binary format.
 ```
-./bin/edgeutil [?directed] [-p prob] [-w ?weighted]  snap_file binary_file
+./bin/edgeutil [-D ?directed] [-p prob] [-w ?weighted]  snap_file binary_file
 ```
 | Parameters |Description|  Default | 
 |------------|-----| ---------|
-| ?directed        | Is the input network directed? | 0/1                           | 1
+| -D        | Is the input network directed? | 0/1                           | 1
 | -p        | How edge probabilies should be distributed, a real number gives you constant probabilies, N(p1,p2) gives you normal distribution with mean p1 variance p2, U(p1,p2) gives uniform distribution between p1 and p2, and w gives weighted cascade probabilities 1/dv  | 0.01  
 | -w        | Is the input graph weighted, weighted snap file should have 3 elements on all lines; source target weight  | 0
 
