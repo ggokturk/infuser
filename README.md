@@ -61,3 +61,18 @@ Output consist of tab seperated 4 elements per line;
 9106	46.64	3.45	12
 ...
 ```
+### How to cite
+
+You can use following BibTeX snippet;
+
+```
+@ARTICLE{9261128,
+  author={G. {Göktürk} and K. {Kaya}},
+  journal={IEEE Transactions on Parallel and Distributed Systems}, 
+  title={Boosting Parallel Influence-Maximization Kernels for Undirected Networks With Fusing and Vectorization}, 
+  year={2021},
+  volume={32},
+  number={5},
+  pages={1001-1013},
+  doi={10.1109/TPDS.2020.3038376}}
+```
