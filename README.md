@@ -40,7 +40,6 @@ We provide a simple tool to convert SNAP format to our binary format.
 | method | Only NewGreedy(Infuser) and HyperFuser(Sketch) is currently available.| HyperFuser|
 | #seed | Seed set size | 50|
 | #MC   | Number of Monte-Carlo simulation performed, it must be a multiple of 32. | 256 | 
-<!-- | blocksize | Only for MixGreedy2, how many blocks should be processed by single thread, Note that each block is sized as AVX vector lenght. AVX2:8, AVX512:16 | 16 -->
 | output | Output file, leave empty for STDOUT | <empty> (STDOUT)|
 ### Example command
 ```
