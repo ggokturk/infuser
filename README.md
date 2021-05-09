@@ -1,6 +1,8 @@
 # InFuseR
 
-A Fast, Parallel Influence Maximization Software, using Fused Sampling and Memory Access Regularization.
+A Fast, Parallel Influence Maximization Software, using Fused Sampling and Memory Access Regularization. 
+
+Currently support two algorithms; InFuseR(NewGreedy), HyperFuser(Sketch-based).
 
 ## Build Instructions
 Building Infuser only requires AVX2/AVX512, and GCC 8.2 or better. Source code should be compatible with MSVC 2019 as well.
@@ -31,15 +33,21 @@ We provide a simple tool to convert SNAP format to our binary format.
 
 
 ```
-./bin/infuser [-M method] [-K #seeds] [-R #MC] [-B blocksize] [-o output] binary_file
+./bin/infuser [-M method] [-K #seeds] [-R #MC]  [-o output] binary_file
 ```
 | Parameters |Description|  Default | 
 |------------|-----| ---------|
-| method | Only MixGreedy and MixGreedy2 is currently available, MixGreedy is parallel on vertices, MixGreedy2 is parallelized on monte-carlo simulations| MixGreedy|
+| method | Only NewGreedy(Infuser) and HyperFuser(Sketch) is currently available.| HyperFuser|
 | #seed | Seed set size | 50|
-| #MC   | Number of Monte-Carlo simulation performed | 2048 | 
-| blocksize | Only for MixGreedy2, how many blocks should be processed by single thread, Note that each block is sized as AVX vector lenght. AVX2:8, AVX512:16 | 16
+| #MC   | Number of Monte-Carlo simulation performed, it must be a multiple of 32. | 256 | 
+<!-- | blocksize | Only for MixGreedy2, how many blocks should be processed by single thread, Note that each block is sized as AVX vector lenght. AVX2:8, AVX512:16 | 16 -->
 | output | Output file, leave empty for STDOUT | <empty> (STDOUT)|
+### Example command
+```
+./bin/edgeutil -D 0 -p 0.01 ./com-orkut.ungraph.txt ./bindata/orkut_001.bin 
+./bin/infuser -M HyperFuser -K 100 -R 256  ./bindata/orkut_001.bin
+
+```
 
 ### Output
 
@@ -47,7 +55,7 @@ Output consist of tab seperated 4 elements per line;
 * Seed Vertex, 
 * Time Spend, 
 * Estimated Influence, 
-* Number of Candidates Processed    
+* Number of Candidates Processed for NewGreedy, Sketch error rate for HyperFuser    
 ```
 14949	5.72	3.45	0
 4429	11.42	3.45	1
@@ -63,7 +71,7 @@ Output consist of tab seperated 4 elements per line;
 ```
 ### How to cite
 
-You can use following BibTeX snippet;
+You can use following BibTeX snippet to cite InFuseR;
 
 ```
 @ARTICLE{9261128,

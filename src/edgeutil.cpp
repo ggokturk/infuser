@@ -1,5 +1,4 @@
 #include "common.h"
-#include <climits>
 using namespace std;
 
 void convert_to_binary(graph_t g, string outfile) {
@@ -8,7 +7,7 @@ void convert_to_binary(graph_t g, string outfile) {
 		cerr << "Cannot open output file!" << endl;
 		return;
 	}
-	cout << g.n << "\t" << g.m << endl;
+	// cout << g.n << "\t" << g.m << endl;
 	wf.write(reinterpret_cast<char*>(&g.n), sizeof(g.n));
 	wf.write(reinterpret_cast<char*>(&g.m), sizeof(g.m));
 	wf.write(reinterpret_cast<char*>(g.xadj), sizeof(uint32_t) * (g.n + 1));
@@ -28,7 +27,7 @@ void convert_to_snap(graph_t g, string outfile) {
 		cerr << "Cannot open output file!" << endl;
 		return;
 	}
-	wf << g.n <<'\t' <<g.m;
+	// wf << g.n <<'\t' <<g.m;
 	
 	for (int i = 0; i < g.n; i++) {
 		for (int j = g.xadj[i]; j < g.xadj[i+1]; j++) {
@@ -38,88 +37,7 @@ void convert_to_snap(graph_t g, string outfile) {
 	wf.close();
 }
 
-
-
 graph_t read_file(string filename, bool directed, string randarg) {
-	graph_t g;
-	float p=0.01;
-	ifstream in(filename);
-	uint32_t s, v, i = 0, j = 0;
-	string line;
-	getline(in, line);
-	vector<int> degrees;
-	vector<pair<pair<uint32_t, uint32_t>, float> > pairs;
-	bool wc = randarg == "w", normal = randarg[0] == 'N', uniform = randarg[0] == 'U';
-	float p0 = 0, p1 = 0;
-	std::default_random_engine generator;
-	std::normal_distribution<float> normal_dist;
-	std::uniform_real_distribution<float> uniform_dist;
-
-	if (normal || uniform)
-		p0 = stof(randarg.substr(2, randarg.find(','))), 
-		p1 = stof(randarg.substr(randarg.find(',')+1, randarg.length() - randarg.find(',') - 1));
-	else if (!wc)
-		p = stof(randarg);
-	if (normal) normal_dist.param(std::normal_distribution<float>::param_type(p0, p1));
-	if (uniform) uniform_dist.param(std::uniform_real_distribution<float>::param_type(p0, p1));
-
-	while (getline(in, line)) {
-		stringstream ss(line);
-		float my_p = p;
-		if (normal)
-			my_p = normal_dist(generator);
-		else if (uniform)
-			my_p = uniform_dist(generator);
-		else if (wc)
-			my_p = 1.0f;
-		ss >> s >> v;
-		pairs.push_back(make_pair(make_pair(s, v), my_p));
-		if (!directed)
-			pairs.push_back(make_pair(make_pair(v, s), my_p));
-		if (s >= g.n) g.n = s + 1;
-		if (v >= g.n) g.n = v + 1;
-	}
-	sort(pairs.begin(), pairs.end());
-	if (wc){
-		degrees.resize(g.n, 0);
-		for (auto e : pairs)
-			degrees[get<1>(get<0>(e))] += get<1>(e);
-	}
-	for (auto it = cbegin(pairs), last = cend(pairs); it != last; g.m++)
-		it = std::upper_bound(it, last, *it);
-	g.xadj = new unsigned[g.n + 1];
-	g.adj = new edge_t[g.m];
-	uint32_t ind = 0;
-	for (int i = 0; i < pairs.size();) {
-		auto e = get<0>(pairs[i]);
-		auto w = get<1>(pairs[i]);
-		auto a = get<0>(e), b = get<1>(e);
-		for (; ind <= a; ind++)
-			g.xadj[ind] = j;
-		int count = 1;
-		if (!wc) {
-			for (i = i + 1; i < pairs.size() && get<0>(pairs[i - 1]) == get<0>(pairs[i]); i++) {
-				w = w + (1.0 - w) * (get<1>(pairs[i]));
-			}
-		}
-		else {
-			for (i = i + 1; i < pairs.size() && get<0>(pairs[i - 1]) == get<0>(pairs[i]); i++) {
-				if (degrees[b] != 0)
-					w = 1.0f / degrees[b];
-				else w = 1.0;
-			}
-		}
-		float prob = std::max(0.0f, std::min(w, 1.0f)); //CLAMP
-		int hash = directed ? (int)__hash((uint64_t(a) << 32) | b) : (int)__hash(a, b);
-		g.adj[j++] = { ind, b,  int(prob * double(HASHMASK)), hash };
-	}
-	for (; ind <= g.n; ind++)
-		g.xadj[ind] = j;
-	return g;
-}
-
-
-graph_t read_file2(string filename, bool directed, string randarg) {
 	graph_t g;
 	float p = 0.01;
 	ifstream in(filename);
@@ -144,6 +62,8 @@ graph_t read_file2(string filename, bool directed, string randarg) {
 	if (uniform) uniform_dist.param(std::uniform_real_distribution<float>::param_type(p0, p1));
 
 	while (getline(in, line)) {
+		if (line.length() > 0 && (line.at(0) == '#' || line.at(0) == '%'))
+			continue;
 		stringstream ss(line);
 		float my_p = p;
 		if (normal)
@@ -199,7 +119,7 @@ graph_t read_file2(string filename, bool directed, string randarg) {
 			float w = adjlist[i][j].second;
 			if (wc) {
 				if (degrees[b] != 0)
-					w = 1.0f / degrees[b];
+					w = (1.0f *w) / degrees[b];
 				else w = 1.0;
 			}
 			float prob = std::max(0.0f, std::min(w, 1.0f)); //CLAMP
@@ -212,9 +132,9 @@ graph_t read_file2(string filename, bool directed, string randarg) {
 }
 
 int main(int argc, char* argv[]) {
-	bool directed = false, weighted = false;
+	bool directed = true, weighted = false;
 	string filename, outfile, format="bin", p = "0.01";
-	;
+	
 	ofstream out;
 	if (argc < 3)
 		cerr << "Usage: " << argv[0] << " <-p 0.01/N(0,1)/U(0,1) > <-D directed=[!0!,1]> <-f !bin >  input output ";
@@ -228,7 +148,7 @@ int main(int argc, char* argv[]) {
 		else if (filename=="") filename = argv[i];
 		else outfile = argv[i];
 	}
-	graph_t g = read_file2(filename, directed, p);
+	graph_t g = read_file(filename, directed, p);
 	if (format=="bin")
 		convert_to_binary(g, outfile);
 	else if (format=="edgelist")
