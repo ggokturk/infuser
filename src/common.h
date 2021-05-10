@@ -67,14 +67,6 @@ struct graph_t {
 	unsigned* xadj, * t; size_t n = 0, m = 0;
 	edge_t* adj;
 };
-//uint64_t popcnt(const uint64_t* data, const size_t n) {
-//	uint64_t result = 0;
-//#pragma unroll
-//	for (int i = 0; i < n; i++) {
-//		result += _mm_popcnt_u64(data[i]);
-//	}
-//	return result;
-//}
 uint64_t popcnt(const char* ptr, const size_t size) {
 
 	uint64_t i = 0;
@@ -261,12 +253,6 @@ vector<graph_t> split(const graph_t& g, size_t batch_size, T& rand_seeds) {
 		__g.m = j;
 #pragma omp critical
 		samples.push_back(__g);
-		/* */
-		cout << float(__g.m) / (g.m) << endl;
-		//cout << memcmp(g.adj, __g.adj, sizeof(edge_t) * g.m) << endl;
-		//cout << memcmp(g.xadj, __g.xadj, sizeof(int) * g.n) << endl;
-		//for (int i = 0; i < 10; i++)
-		//	cout << g.xadj[i] << " " << __g.xadj[i] << endl;
 	}
 	return samples;
 }
