@@ -7,7 +7,6 @@ using namespace std;
 void oracle(const graph_t& g, size_t K, const int R) {
 	auto cache_ptr = make_unique<char[]>(R * g.n);
 	auto rand_seeds = get_rands(R);//get_aligned<int>(R);
-	//for (int i = 0; i < R; i++) rand_seeds[i] = __hash(-i - 1);
 	float score = 0;
 	for (int i; cin >> i;)
 		score = run_ic_vertpar(g, i, R, rand_seeds.get(), cache_ptr.get());
