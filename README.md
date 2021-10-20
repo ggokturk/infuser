@@ -2,50 +2,59 @@
 
 A Fast, Parallel Influence Maximization Software, using Fused Sampling and Memory Access Regularization. 
 
-Currently support two algorithms; InFuseR(NewGreedy), HyperFuser(Sketch-based).
+Currently support three algorithms; InFuseR(NewGreedy), HyperFuser(Sketch-based), SuperFuseR(GPU-specialized).
 
 ## Build Instructions
 Building Infuser only requires AVX2/AVX512, and GCC 8.2 or better. Source code should be compatible with MSVC 2019 as well.
+SuperFuseR requires CUDA 11.1+.
 
-We provide a very simple Makefile for building from the source code.
+We provide a very simple Makefile for building from the source code. Executables will be placed under ./bin folder
 ```
-mkdir bin
+cd infuser
 make
 ```
 
 ## Usage
 
-For fast processing, InFuseR only accepts a custom binary format that is directly maps to internal data-structures.
+### Input Graph Format
+For fast processing, InFuseR only accepts a text file structured as follows;
+
+\# First line tells infuser to how many vertices and edges exists\
+\# Then every other line has pairs of source_vertex_id target_vertex_id edge_probability\
+\# We require source_vertex_ids to be sorted for performance and simplicity, using add_p automaticly sorts output files\
+5 10 \
+0 1 0.01 \
+0 2 0.02 \
+0 4 0.1 \
+3 4 0.05 \
+4 1 0.09 
 
 ### Preprocessing 
 
-We provide a simple tool to convert SNAP format to our binary format.
+We provide a simple tool to add probabilities to SNAP edgelist format. The tool excepts multiple output at the same time.
 ```
-./bin/edgeutil [-D ?directed] [-p prob] [-w ?weighted]  snap_file binary_file
+python3 ./scripts/add_p --help
+python3 ./scripts/add_p -p 0.01 -U 0.0 0.1 -pf constantprobfile.txt -Uf uniformdistfile.txt inputfile.txt
 ```
-| Parameters |Description|  Default | 
-|------------|-----| ---------|
-| -D        | Is the input network directed? | 0/1                           | 1
-| -p        | How edge probabilies should be distributed, a real number gives you constant probabilies, N(p1,p2) gives you normal distribution with mean p1 variance p2, U(p1,p2) gives uniform distribution between p1 and p2, and w gives weighted cascade probabilities 1/dv  | 0.01  
-| -w        | Is the input graph weighted, weighted snap file should have 3 elements on all lines; source target weight  | 0
+Example generates a graph with constant probility 0.01 named constantprobfile.txt and another file with uniform weights between 0 and 0.1 named uniformdistfile.txt 
 
 ### Running
 
-
 ```
-./bin/infuser [-M method] [-K #seeds] [-R #MC]  [-o output] binary_file
+./bin/infuser [-M method] [-K #seeds] [-R #MC] [-o output] edge_file
+./bin/infuser [-g ndevices] [-K #seeds] [-R #MC] [-o output] edge_file
 ```
 | Parameters |Description|  Default | 
 |------------|-----| ---------|
-| method | Only NewGreedy(Infuser) and HyperFuser(Sketch) is currently available.| HyperFuser|
+| method | Using Infuser NewGreedy(Infuser) and HyperFuser(Sketch) methods are available, using SuperFuseR executable SingleGPU and MultiGPU methods are available. | HyperFuser, SingleGPU|
 | #seed | Seed set size | 50|
-| #MC   | Number of Monte-Carlo simulation performed, it must be a multiple of 32. | 256 | 
+| #MC   | Number of Monte-Carlo simulation performed, it must be a multiple of 32. | 256 |
+| ndevices| Number of CUDA devices (only for Superfuser)| 1 | 
 | output | Output file, leave empty for STDOUT | <empty> (STDOUT)|
-### Example command
+### Example commands
 ```
-./bin/edgeutil -D 0 -p 0.01 ./com-orkut.ungraph.txt ./bindata/orkut_001.bin 
-./bin/infuser -M HyperFuser -K 100 -R 256  ./bindata/orkut_001.bin
-
+./bin/infuser -M InFuseR -K 100 -R 256  ./amazon0302_0.01.txt
+./bin/superfuser -g 1 -K 100 -R 256  ./amazon0302_0.01.txt
 ```
 
 ### Output
@@ -54,18 +63,18 @@ Output consist of tab seperated 4 elements per line;
 * Seed Vertex, 
 * Time Spend, 
 * Estimated Influence, 
-* Number of Candidates Processed for NewGreedy, Sketch error rate for HyperFuser    
+* Number of Candidates Processed for NewGreedy, Sketch error rate for HyperFuser
 ```
-14949	5.72	3.45	0
-4429	11.42	3.45	1
-33	16.74	3.45	2
+14949   5.72	3.45	0
+4429    11.42	3.45	1
+33      16.74	3.45	2
 10519	21.49	3.45	3
 12771	26.14	3.45	4
 8       30.62	3.45	5
-481	34.93	3.45	7
-5737	39.12	3.45	8
-297	43.07	3.45	9
-9106	46.64	3.45	12
+481     34.93	3.45	7
+5737    39.12	3.45	8
+297     43.07	3.45	9
+9106    46.64	3.45	12
 ...
 ```
 ### How to cite

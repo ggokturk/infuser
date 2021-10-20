@@ -62,21 +62,18 @@ struct Timer{
 	double elapsed() const { return std::chrono::duration_cast<second_> (clock_::now() - beg_).count(); }
 } t;
 
-struct edge_t { unsigned s,v; signed w, h; };
+struct edge_t { unsigned v; signed w; };
 struct graph_t {
-	unsigned* xadj, * t; size_t n = 0, m = 0;
+	size_t* xadj, n = 0, m = 0;
 	edge_t* adj;
 };
+
 uint64_t popcnt(const char* ptr, const size_t size) {
-
-	uint64_t i = 0;
-	uint64_t cnt = 0;
-
+	uint64_t i = 0, cnt = 0;
 	for (; i < size - size % 8; i += 8)
 		cnt += _mm_popcnt_u64(*(const uint64_t*)(ptr + i));
 	for (; i < size; i++)
 		cnt += _mm_popcnt_u64(ptr[i]);
-
 	return cnt;
 }
 uint64_t parpopcnt(const char* ptr, const size_t size) {
@@ -106,7 +103,10 @@ inline uint64_t __hash64(uint64_t h) {
 	h ^= h >> 33;
 	return h;//FFFF;
 }
-
+inline uint32_t edge_hash(const uint32_t x, const uint32_t y) {
+	uint64_t h = (((uint64_t)x) << 32) | y;
+	return __hash(h);
+}
 inline uint32_t __hash(const uint32_t x, const uint32_t y) {
 	uint64_t h = (x > y) ? (((uint64_t)y) << 32) | x : (((uint64_t)x) << 32) | y;
 	return __hash(h);
@@ -144,53 +144,6 @@ unique_ptr<T[], decltype(&_aligned_free)> get_aligned(size_t elems, size_t align
 	return unique_ptr<T[], decltype(&_aligned_free)>(ptr, &_aligned_free);
 }
 
-
-graph_t read_file(std::string filename, bool directed, float p) {
-  graph_t g;
-	ifstream in(filename);
-	uint32_t s, v, i = 0, j = 0;
-	string line;
-	getline(in,line);
-	vector<pair<pair<uint32_t, uint32_t>, float> > pairs;
-	while (getline(in,line)) {
-		stringstream ss(line);
-		float my_p = p;
-		ss >> s >> v >> my_p;
-		pairs.push_back(make_pair(make_pair(s, v),my_p));
-		if (!directed)
-			pairs.push_back(make_pair(make_pair(v, s),my_p) );
-		if (s >= g.n) g.n = s + 1;
-		if (v >= g.n) g.n = v + 1;
-	}
-#if _MSC_VER >= 1910
-	sort(pairs.begin(), pairs.end());
-#else
-	__gnu_parallel::sort(pairs.begin(), pairs.end());
-#endif
-	for (auto it = cbegin(pairs), last = cend(pairs); it != last; g.m++)
-		it = std::upper_bound(it, last, *it);
-	g.xadj = new unsigned[g.n + 1];
-	g.adj = new edge_t[g.m];
-	uint32_t ind = 0;
-	for (int i = 0; i < pairs.size();) {
-		auto e = get<0>(pairs[i]);
-		auto w = get<1>(pairs[i]);
-		auto a = get<0>(e),b= get<1>(e);
-		for (; ind <= a; ind++)
-			g.xadj[ind] = j;
-		int count = 1;
-		for (i = i + 1; i < pairs.size() && get<0>(pairs[i - 1]) == get<0>(pairs[i]); i++){
-			w = w + (1.0-w)*(get<1>(pairs[i]));
-		}
-		float prob = std::max(0.0f, std::min(w, 1.0f)); //CLAMP
-		int hash = directed? (int)__hash((uint64_t(a)<<32)|b) : (int)__hash(a, b);		
-		g.adj[j++] = { ind, b,  int(prob * double(HASHMASK)), hash };
-	}
-	for (; ind <= g.n; ind++)
-		g.xadj[ind] = j;
-	return g;
-}
-
 graph_t read_bin(string filename) {
 	graph_t g;
 	ifstream rf(filename, std::ios::out | std::ios::binary);
@@ -201,10 +154,30 @@ graph_t read_bin(string filename) {
 	int mode;
 	rf.read((char*)&g.n, sizeof(g.n));
 	rf.read((char*)&g.m, sizeof(g.m));
-	g.xadj = new unsigned[g.n + 1];
+	g.xadj = new size_t[g.n + 1];
 	g.adj = new edge_t[g.m];
-	rf.read((char*)g.xadj, size_t(g.n + 1) * sizeof(uint32_t));
+	rf.read((char*)g.xadj, size_t(g.n + 1) * sizeof(g.xadj[0]));
 	rf.read((char*)g.adj, size_t(g.m) * sizeof(edge_t));
+	return g;
+}
+graph_t read_txt(string filename) {
+	graph_t g;
+	ifstream rf(filename);
+	if (!rf) {
+		cerr << "Cannot open file!" << endl;
+		return g;
+	}
+	rf >> g.n >> g.m;
+	g.xadj = new size_t[g.n + 1];
+	g.adj = new edge_t[g.m];
+	unsigned s, t; float w;
+	unsigned i = 0; size_t j = 0;
+	while (rf >> s >> t >> w) {
+		while (i <= s)
+			g.xadj[i++] = j;
+		g.adj[j++] = { t, int(w * INT_MAX) };
+ 	}
+	g.xadj[i] = j;
 	return g;
 }
 #include <assert.h>
@@ -220,11 +193,13 @@ vector<graph_t> split(const graph_t& g, size_t batch_size, T& rand_seeds) {
 		__g.m = 0;
 		// first pass to detect # of edges sampled
 		for (int s = 0; s < g.n; s++) {
+			const auto hash_s = _mm_crc32_u32(0, s);
 			for (int it = g.xadj[s]; it < g.xadj[s + 1]; it++) {
 				const edge_t e = g.adj[it];
+				const auto hash_sv = _mm_crc32_u32(s, e.v)>>1;
 				for (int r = 0; r < batch_size; r++) {
 					unsigned rnd = rand_seeds[sid][r];
-					if (((rnd ^ e.h) <= e.w)) 
+					if (((rnd ^ hash_sv) <= e.w))
 					{
 						__g.m++;
 						break;
@@ -232,15 +207,17 @@ vector<graph_t> split(const graph_t& g, size_t batch_size, T& rand_seeds) {
 				}
 			}
 		}
-		__g.xadj = new unsigned[g.n + 1];
+		__g.xadj = new size_t[g.n + 1];
 		__g.adj = new edge_t[__g.m];
 		int j = 0; __g.xadj[0] = 0;
 		for (int s = 0; s < g.n; s++) {
+			const auto hash_s = _mm_crc32_u32(0, s);
 			for (int it = g.xadj[s]; it < g.xadj[s + 1]; it++) {
 				const edge_t e = g.adj[it];
+				const auto hash_sv = _mm_crc32_u32(s, e.v)>>1;
 				for (int r = 0; r < batch_size; r++) {
 					unsigned rnd = rand_seeds[sid][r];
-					if (((rnd ^ e.h) <= e.w)) 
+					if (((rnd ^ hash_sv) <= e.w))
 					{
 						__g.adj[j++] = g.adj[it];
 						break;
@@ -253,6 +230,12 @@ vector<graph_t> split(const graph_t& g, size_t batch_size, T& rand_seeds) {
 		__g.m = j;
 #pragma omp critical
 		samples.push_back(__g);
+		/* */
+		cout << float(__g.m) / (g.m) << endl;
+		//cout << memcmp(g.adj, __g.adj, sizeof(edge_t) * g.m) << endl;
+		//cout << memcmp(g.xadj, __g.xadj, sizeof(int) * g.n) << endl;
+		//for (int i = 0; i < 10; i++)
+		//	cout << g.xadj[i] << " " << __g.xadj[i] << endl;
 	}
 	return samples;
 }
@@ -267,26 +250,30 @@ vector<graph_t> split(const graph_t& g, size_t R, int* rand_seeds, int n_splits)
 		__g.m = 0;
 		// first pass to detect # of edges sampled
 		for (int s = 0; s < g.n; s++) {
+			const auto hash_s = _mm_crc32_u32(0, s);
 			for (int it = g.xadj[s]; it < g.xadj[s + 1]; it++) {
 				const edge_t e = g.adj[it];
+				const auto hash_sv = _mm_crc32_u32(s, e.v)>>1;
 				for (int b = r; b < r + step; b++) {
 					int rnd = rand_seeds[b];
-					if (((rnd ^ e.h) < e.w)) {
+					if (((rnd ^ hash_sv) < e.w)) {
 						__g.m++;
 						break;
 					}
 				}
 			}
 		}
-		__g.xadj = new unsigned[g.n + 1];
+		__g.xadj = new size_t[g.n + 1];
 		__g.adj = new edge_t[__g.m];
 		int j = 0; __g.xadj[0] = 0;
 		for (int s = 0; s < g.n; s++) {
+			const auto hash_s = _mm_crc32_u32(0, s);
 			for (int it = g.xadj[s]; it < g.xadj[s + 1]; it++) {
 				const edge_t e = g.adj[it];
+				const auto hash_sv = _mm_crc32_u32(s, e.v)>>1;
 				for (int b = r; b < r + step; b++) {
 					int rnd = rand_seeds[b];
-					if (((rnd ^ e.h) < e.w)) {
+					if (((rnd ^ hash_sv) < e.w)) {
 						__g.adj[j++] = g.adj[it];
 						break;
 					}
@@ -300,12 +287,24 @@ vector<graph_t> split(const graph_t& g, size_t R, int* rand_seeds, int n_splits)
 	}
 	return samples;
 }
-unique_ptr<int[], decltype(&_aligned_free)> get_rands(size_t size) {
+//unique_ptr<int[], decltype(&_aligned_free)> get_rands(size_t size) {
+//	std::default_random_engine e1(42);
+//	std::uniform_int_distribution<int> uniform_dist(0, INT_MAX);
+//
+//	auto rand_seeds = get_aligned<int>(size);
+//	for (int i = 0; i < size; i++)
+//		rand_seeds[i] = uniform_dist(e1);
+//	return move(rand_seeds);
+//}
+
+unique_ptr<int[], decltype(&_aligned_free)> get_rands(size_t size, size_t offset=0) {
 	std::default_random_engine e1(42);
 	std::uniform_int_distribution<int> uniform_dist(0, INT_MAX);
+	for (size_t i = 0; i < offset; i++)
+		uniform_dist(e1); // burn few to get deterministic values
 
 	auto rand_seeds = get_aligned<int>(size);
-	for (int i = 0; i < size; i++)
+	for (size_t i = 0; i < size; i++)
 		rand_seeds[i] = uniform_dist(e1);
 	return move(rand_seeds);
 }

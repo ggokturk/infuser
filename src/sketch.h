@@ -41,22 +41,49 @@ inline __m256i expand_bits_to_bytes(uint32_t x){
 //void simulate_sketch(const graph_t& g, const size_t R, char* hypers, int* rands, char* visited, float threshold) {
 //	const int ITER_LIMIT = 20;
 //	float total = 0;
+//	vector<char> active(g.n, 1);
+//	vector<char> nactive(g.n, 0);
+//
 //	for (int iter = 0; iter < ITER_LIMIT; iter++) {
 //#pragma omp parallel for schedule(dynamic, 8192)// reduction(+:active_count) // reduction(or:cont)
 //		for (int u = 0; u < g.n; u++) {
 //			const uint32_t begin_p = g.xadj[u], end_p = g.xadj[u + 1];
+//			bool flag = false;
+//			auto hash_u = _mm_crc32_u32(0, u);
 //			for (uint32_t i = begin_p; i < end_p; i++) {
 //				const edge_t e = g.adj[i];
+//				if (!active[e.v])
+//					continue;
+//				auto hash_uv = _mm_crc32_u32(hash_u, e.v) >> 1;
 //				for (int r = 0; r < R; r ++) {
 //					int rnd = rands[r];
-//					if (((rnd ^ e.h) <= e.w) && (hypers[e.s * R + r] < hypers[e.v * R + r])) {
-//						hypers[e.s * R + r] = hypers[e.v * R + r];
+//					if (((rnd ^ hash_uv) <= e.w) && (hypers[u * R + r] < hypers[e.v * R + r])) {
+//						hypers[u * R + r] = hypers[e.v * R + r];
+//						flag = true;
 //					}
 //				}
 //			}
+//			if (flag)
+//				nactive[u] = true;
+//
 //		}
+//		int64_t active_count = 0;
+//		//#pragma omp parallel for reduction(+:active_count)
+//		for (int i = 0; i < g.n; i++) {
+//			active_count += nactive[i];
+//		}
+//		float active_rate = float(active_count) / g.n;
+//		if (active_rate <= threshold) {
+//			break;
+//		}
+//		swap(active, nactive);
+//		parfill(nactive, char(0));
 //	}
 //}
+//
+#ifdef fillrate
+uint64_t fr_filled = 0, fr_taken=0; 
+#endif
 
 template <bool check_blocked>
 void simulate_sketch(const graph_t& g, const size_t R, char* hypers, int* rands, char* visited, float threshold) {
@@ -65,28 +92,39 @@ void simulate_sketch(const graph_t& g, const size_t R, char* hypers, int* rands,
 	vector<char> active(g.n, 1);
 	vector<char> nactive(g.n, 0);
 	for (int iter = 0; iter < ITER_LIMIT; iter++) {
-		//FIXME
-#pragma omp parallel for schedule(dynamic, 8192)// reduction(+:active_count) // reduction(or:cont)
+
+#pragma omp parallel for schedule(dynamic, 8192)
 		for (int u = 0; u < g.n; u++) {
 			const uint32_t begin_p = g.xadj[u], end_p = g.xadj[u + 1];
 			bool flag = false;
+			auto hash_u = _mm_crc32_u32(0, u);
 			for (uint32_t i = begin_p; i < end_p; i++) {
 				const edge_t e = g.adj[i];
 				if (!active[e.v])
 					continue;
 				for (int r = 0; r < R; r += 32) {
-					const auto edge_hash8 = _mm256_set1_epi32(g.adj[i].h),
+					auto hash = _mm_crc32_u32(hash_u, e.v)>>1;//__hash(u, e.v)>>1;
+					const auto edge_hash8 = _mm256_set1_epi32(hash),
 						threshold = _mm256_set1_epi32(g.adj[i].w);
 					unsigned packed = 0;
 					for (int b = 0; b < 32; b += 8) {
 						const auto prob_hash = _mm256_xor_si256(*(__m256i*)(&rands[r + b]), edge_hash8);
 						packed |= unsigned(_mm256_movemask_ps(_mm256_castsi256_ps(
-							_mm256_cmpgt_epi32(threshold, prob_hash)))) << (b);
+							_mm256_cmpgt_epi32(threshold, prob_hash)))) << (b);//check shift latency
 					}
-					if (!packed)
+					if(packed==0)
 						continue;
+#ifdef fillrate
+#pragma omp atomic
+					fr_taken ++;
+					uint64_t ones = double(_mm_popcnt_u32(packed));
+#pragma omp atomic
+					fr_filled += ones;
+#endif
+
 					if constexpr (check_blocked)
-						packed &= ~visited[u * (R/8) + r/8];
+						packed &= ~visited[u * (R/8) + r/8];// shift 3 bits
+
 						//packed &= ~visited[(r >> 5) * g.n + u];
 					const auto cmp = expand_bits_to_bytes(~packed);
 					const auto cmp2 = _mm256_cmpgt_epi8(*(__m256i*) & hypers[e.v * R + r], *(__m256i*) & hypers[u * R + r]);
@@ -99,13 +137,13 @@ void simulate_sketch(const graph_t& g, const size_t R, char* hypers, int* rands,
 			}
 			if (flag) nactive[u] = true;
 		}
-
 		int64_t active_count = 0;
-//#pragma omp parallel for reduction(+:active_count)
-		for (int i = 0; i < g.n; i++) {
+		int step = 100;
+#pragma omp parallel for reduction(+:active_count)
+		for (int i = 0; i < g.n; i+=step) {
 			active_count += nactive[i];
 		}
-		float active_rate = float(active_count) / g.n;
+		double active_rate = double(active_count)*double(step) / g.n;
 		if (active_rate <= threshold) {
 			break;
 		}
@@ -130,18 +168,18 @@ double run_ic_vertpar(const graph_t& g, const uint32_t S, const size_t R, int32_
 			if (!active[u])
 				continue;
 			bool gflag = false;
+			auto hash_u = _mm_crc32_u32(0, u);
 			const uint32_t begin_p = g.xadj[u], end_p = g.xadj[u + 1];
 			for (uint32_t i = begin_p; i < end_p; i++) {
 				const edge_t e = g.adj[i];
 				bool flag = false;
 				const uint32_t v = e.v;
-				const auto edge_hash8 = _mm256_set1_epi32(g.adj[i].h),
+				const auto edge_hash8 = _mm256_set1_epi32(_mm_crc32_u32(hash_u,g.adj[i].v)>>1),
 					threshold = _mm256_set1_epi32(g.adj[i].w);
 
 				for (int r = 0; r < R; r += BLOCKSIZE) {
 					const auto roffset = r / 8;
-					const auto edge_hash8 = _mm256_set1_epi32(g.adj[i].h),
-						threshold = _mm256_set1_epi32(g.adj[i].w);
+					const auto threshold = _mm256_set1_epi32(g.adj[i].w);
 					const uint64_t curr_sims = *((uint64_t*)&(visited[u * (Roffset)+(roffset)]));
 
 					uint64_t packed = 0;
@@ -170,19 +208,19 @@ double run_ic_vertpar(const graph_t& g, const uint32_t S, const size_t R, int32_
 		parfill(nactive, char(0));
 	}
 	float score = parpopcnt((char*)visited, g.n * R / 8);
-	
 	return  score/R;
 }
 
 #ifdef _MSC_VER
 #define __builtin_clzll __lzcnt64
 #endif
-void hyperfuser(const graph_t& g, const int K, const size_t R, float eps, float tr, float trc) {
+void hyperfuser(const graph_t& g, const int K, const size_t R, float eps, float tr, float trc, bool sorted) {
 	auto hypers = get_aligned<char>(R * g.n);
 	auto mask = get_aligned<char>(R);
 	std::fill(mask.get(), mask.get() + R, 0);
 	auto rand_seeds = get_rands(R);
-	std::sort(rand_seeds.get(), rand_seeds.get() + R);
+	if (sorted)
+		std::sort(rand_seeds.get(), rand_seeds.get() + R);
 
 #pragma omp parallel for
 	for (int i = 0; i < g.n; i++)
@@ -210,7 +248,11 @@ void hyperfuser(const graph_t& g, const int K, const size_t R, float eps, float 
 		S.push_back(s);
 		float err = (max_s - mg) / mg;
 		float ratio = abs(max_s - mg) / score;
-		cout << s << "\t" << score << "\t" << t.elapsed() << "\t" << err * 100 << '%' << endl;
+		cout << s << "\t" << score << "\t" << t.elapsed() << "\t" << err * 100 << '%'
+		// #ifdef fillrate
+		// << " " <<fr_filled << "/" << fr_taken<<"="<<(fr_filled/fr_taken)<<" "
+		// #endif 
+		<< endl;
 		if (err > eps && ratio > tr) {
 #pragma omp parallel for
 			for (int i = 0; i < g.n; i++)
@@ -228,6 +270,10 @@ void hyperfuser(const graph_t& g, const int K, const size_t R, float eps, float 
 				*(__m256i*)& (mask[j]) = _mm256_max_epi8(*(__m256i*) & (mask[j]), *(__m256i*) & (hypers[s * R + j]));
 		}
 	}
+#ifdef fillrate
+	cout <<  "fillrate:" << (double(fr_filled) / (double(fr_taken)*sizeof(int)*8))  <<endl;
+#endif
+
 }
 void fill_hypers_cpu(char* hypers, int n, int R, int batch_size, int offset) {
 #pragma omp parallel for

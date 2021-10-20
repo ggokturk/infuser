@@ -29,7 +29,7 @@ void scc(float scores[], const graph_t& g, const int R, const size_t BLOCKSIZE, 
 				for (uint32_t i = begin_p; i < end_p; i++) {
 					const edge_t e = g.adj[i];
 					const auto target = e.v;
-					const auto hash = (e.h);
+					const auto hash = _mm_crc32_u32(_mm_crc32_u32(0, n),e.v)>>1;//(e.h);
 					const auto w = (e.w);
 
 					//if (!active[target]) continue;
@@ -69,7 +69,6 @@ void scc(float scores[], const graph_t& g, const int R, const size_t BLOCKSIZE, 
 			}
 			swap(active, nactive);
 			parfill(nactive.get(), nactive.get() + g.n, false);
-			//__gnu_parallel::fill(nactive.begin(), nactive.end(), false);
 		}
 #pragma omp parallel for 
 		for (int i = 0; i < g.n; i++) {
@@ -97,11 +96,9 @@ void get_s_cc(unsigned* s_cc, const graph_t& g, const std::vector<unsigned>& S, 
 
 		int i = k - 2;
 #pragma omp parallel for 
-		//for (int i = 0; i < k - 1; i++) {
 		for (int j = 0; j < BLOCKSIZE; j++) {
 			s_cc[i * BLOCKSIZE + j] = labels[S[i] * BLOCKSIZE + j];
 		}
-		//}
 	}
 }
 
@@ -158,7 +155,7 @@ void scc2(float* scores, const graph_t& g, const int R, const size_t BLOCKSIZE,
 				for (uint32_t i = begin_p; i < end_p; i++) {
 					const edge_t e = g.adj[i];
 					const auto target = e.v;
-					const auto hash = (e.h);
+					const auto hash = _mm_crc32_u32(_mm_crc32_u32(0, n), e.v);//(e.h);
 					const auto w = (e.w);
 
 					//if (!active[target]) continue;
@@ -344,7 +341,7 @@ void newgreedy2(const graph_t& g, const int K, const int R, const size_t blocksi
 	}
 }
 
-void newgreedy(const graph_t& g, const int K, const int R) {
+void newgreedy(const graph_t& g, const int K, const int R, bool sorted) {
 	t.reset();
 	vector<unsigned> S(K), iteration(g.n, 0);
 	vector<float> marginal_gain(g.n, 0);
@@ -356,10 +353,10 @@ void newgreedy(const graph_t& g, const int K, const int R) {
 	parfill(counts.get(), counts.get() + size, 0.0f);
 	parfill(scores.get(), scores.get() + g.n, 0.0f);
 	auto labels = get_aligned<unsigned>(size);
-	auto rand_seeds = get_aligned<int>(R);
-	for (int i = 0; i < R; i++)
-		rand_seeds[i] = __hash(-i - 1);
-	std::sort(rand_seeds.get(), rand_seeds.get() + R);
+	auto rand_seeds = get_rands(R);
+	if (sorted)
+		std::sort(rand_seeds.get(), rand_seeds.get() + R);
+
 	int blocksize = R;
 	scc(scores.get(), g, R, blocksize, counts.get(), labels.get(), rand_seeds.get());
 	auto cmp = [&](uint32_t left, uint32_t right) {
@@ -373,7 +370,6 @@ void newgreedy(const graph_t& g, const int K, const int R) {
 
 	float max_for_k = -1;
 	int tries = 0;
-	//vector<unsigned> s_cc(K*R,-1);
 	auto s_cc = get_aligned<unsigned>(K * R);
 	for (size_t k = 0; k < K;) {
 		const auto u = q.top();
@@ -381,18 +377,14 @@ void newgreedy(const graph_t& g, const int K, const int R) {
 		S[k] = u;
 		if (iteration[u] == k) {
 			k++; // commit candidate
-			//run_ic_64_s1_c(g, uvec{ u }, 1, R, cache);
 			score += marginal_gain[u];
-
 			get_s_cc(s_cc.get(), g, S, k + 1, R, labels.get(), counts.get(), blocksize);
 			printf("%d\t%.2f\t%.2f\t%d\n", u, score, t.elapsed(), tries);
 			fflush(stdout);
 		}
 		else {
 			tries++;
-			//std::copy(cache, cache + elems, visited);
-
-			marginal_gain[u] = run(g, S, k + 1, R, s_cc.get(), labels.get(), counts.get(), blocksize);//run_ic_64_s1_c(g, uvec{ u }, 1, R, visited) - score;
+			marginal_gain[u] = run(g, S, k + 1, R, s_cc.get(), labels.get(), counts.get(), blocksize);
 			iteration[u] = k; // recently scored
 			q.push(u);
 		}
